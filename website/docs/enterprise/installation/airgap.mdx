@@ -1,0 +1,576 @@
+---
+title: Airgap installation
+sidebar_position: 1
+hide_title: true
+---
+
+import TierLabel from "./_components/TierLabel";
+import CurlCodeBlock from "./_components/CurlCodeBlock";
+
+# Installing Weave GitOps Enterprise in Airgap environments
+
+From [wikipedia](https://en.wikipedia.org/wiki/Air_gap_(networking))
+
+>An air gap, air wall, air gapping or disconnected network is a network security measure employed on one or more computers
+to ensure that a secure computer network is physically isolated from unsecured networks, such as the public Internet or an unsecured local area network...
+
+This document guides on how to install weave gitops enterprise in a restricted environment.
+
+## Assumptions
+
+There are many restrictions possible within an airgap environment. The one this guide is based on, is that
+artifacts required to install weave gitops enterprise could only be consumed from a private registry. It means
+that helm charts and container images needs to exists in the private registry before installation and manifests
+to be properly configure to consume those over the public version ones.
+
+A second assumption is that you could prepare the installation from a proxy host that has internet
+access to push artifacts into the private registry. this is called `install host`.
+
+## How
+
+There are many variations of the following stages and coditions. For our problem statement we consider
+that installing weave gitops enterprise in an airgap environment could follow the following stages.
+
+1. Setup a wge install environment.
+2. Collect artifacts and publish to your private registry.
+3. Install weave gitops enterprise in the airgap environment.
+
+### Setup a wge install environment
+
+The main goal of this stage is to recreate a local weave gitops enterprise within your context, to collect
+the container images and helm charts, that will be required in your private registry for the offline installation.
+
+A three-step setup is followed.
+
+1. Setup an installation host
+2. Setup a private registry
+3. Install weave gitops enterprise
+
+#### Setup an installation host
+
+There are many possible configurations for this host. This guide will assume that the host has installed the following:
+
+- [docker](https://www.docker.com/) as container runtime.
+- [kind](https://kind.sigs.k8s.io/docs/user/quick-start/) to run a kubernetes cluster to install wge.
+- [flux cli](https://fluxcd.io/flux/cmd/) to boostrap flux in the environment.
+- [clusterctl](https://cluster-api.sigs.k8s.io/user/quick-start.html#install-clusterctl) to replicate the cluster management
+capabilities.
+
+**Create Kind Cluster**
+
+Create a kind cluster with `kind create cluster`
+
+**Install flux**
+
+You could use a similar command to the following.
+
+```
+flux bootstrap github \
+  --owner=<github username> \
+  --repository=fleet-infra \
+  --branch=main \
+  --path=./clusters/management \
+  --personal
+```
+#### Setup private registry
+
+//TODO changeme for harbor or artifactory
+
+There are many solutions out there, we will be using a simple one where
+- helm charts are stored in chartmuseum
+- container images in a docker registry
+
+Installed via flux
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: chartmuseum
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://chartmuseum.github.io/charts
+
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: harbor
+  namespace: flux-system
+spec:
+  chart:
+    spec:
+      chart: chartmuseum
+      sourceRef:
+        kind: HelmRepository
+        name: chartmuseum
+        namespace: flux-system
+  interval: 10m0s
+  timeout: 10m0s
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    env:
+      open:
+        DISABLE_API: "false"
+        AUTH_ANONYMOUS_GET: "true"
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: twuni
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://helm.twun.io
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: harbor
+  namespace: flux-system
+spec:
+  chart:
+    spec:
+      chart: docker-registry
+      sourceRef:
+        kind: HelmRepository
+        name: twuni
+        namespace: flux-system
+  interval: 10m0s
+  timeout: 10m0s
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+```
+Test that it works via
+
+```bash
+ docker pull ubuntu:16.04
+ docker tag ubuntu:16.04 myregistry.domain.com:5000/my-ubuntu
+ docker push myregistry.domain.com:5000/my-ubuntu
+ docker pull myregistry.domain.com:5000/my-ubuntu
+```
+
+##### Install Weave Gitops Enterprise
+
+This step is to gather the artifacts and images in your local environment to push to the registry
+
+**Install Cert Manager Helm Release**
+
+```yaml
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: weaveworks-charts
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  timeout: 1m0s
+  url: https://weaveworks.github.io/weave-gitops-profile-examples/
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  labels:
+    weave.works/applied-layer: layer-0
+  name: cert-manager
+  namespace: flux-system
+spec:
+  chart:
+    spec:
+      chart: cert-manager
+      sourceRef:
+        apiVersion: source.toolkit.fluxcd.io/v1beta2
+        kind: HelmRepository
+        name: weaveworks-charts
+        namespace: flux-system
+  install:
+    crds: CreateReplace
+  interval: 1m0s
+  upgrade:
+    crds: CreateReplace
+  values:
+    cert-manager:
+      installCRDs: true
+```
+
+**Install Weave Gitops Enterprise**
+
+We will be using `version: "v0.10.1"` for this guide but the manifest might vary depending on the version
+that you want to install and the components that you environment would need. This guide assumes that
+all components will be required so configured to be enabled.
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: weave-gitops-enterprise-charts
+  namespace: flux-system
+spec:
+  interval: 10m
+  secretRef:
+    name: weave-gitops-enterprise-credentials
+  url: https://charts.dev.wkp.weave.works/releases/charts-v3
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: weave-gitops-enterprise
+  namespace: flux-system
+spec:
+  chart:
+    spec:
+      chart: mccp
+      sourceRef:
+        kind: HelmRepository
+        name: weave-gitops-enterprise-charts
+        namespace: flux-system
+  interval: 10m0s
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+  values:
+    global:
+      capiEnabled: true
+    enablePipelines: true
+    enableTerraformUI: true
+    clusterBootstrapController:
+      enabled: true
+    cluster-controller:
+      controllerManager:
+        kubeRbacProxy:
+          image:
+            repository: gcr.io/kubebuilder/kube-rbac-proxy
+            tag: v0.8.0
+        manager:
+          image:
+            repository: docker.io/weaveworks/cluster-controller
+            tag: v1.4.1
+    policy-agent:
+      enabled: true
+      image: weaveworks/policy-agent
+    pipeline-controller:
+      controller:
+        manager:
+          image:
+            repository: ghcr.io/weaveworks/pipeline-controller
+    images:
+      clustersService: docker.io/weaveworks/weave-gitops-enterprise-clusters-service:v0.10.1
+      uiServer: docker.io/weaveworks/weave-gitops-enterprise-ui-server:v0.10.1
+      clusterBootstrapController: weaveworks/cluster-bootstrap-controller:v0.4.0
+```
+
+**Install TF-Controller - Optional**
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: tf-controller
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://weaveworks.github.io/tf-controller/
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: tf-controller
+  namespace: flux-system
+spec:
+  chart:
+    spec:
+      chart: tf-controller
+      version: "0.9.2"
+      sourceRef:
+        kind: HelmRepository
+        name: tf-controller
+        namespace: flux-system
+  interval: 10m0s
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+
+```
+
+**Install CAPI**
+
+This would vary depending on the provider, given we are in a offline environment, we assume that
+a private cloud scenario would be most likely to happen so will be using liquidmetal  capi.
+
+https://weaveworks-liquidmetal.github.io/site/docs/tutorial-basics/capi/
+
+```bash
+mkdir -p ~/.cluster-api
+```
+
+```bash
+export CAPMVM_VERSION=v0.7.0
+
+cat << EOF >>~/.cluster-api/clusterctl.yaml
+providers:
+  - name: "microvm"
+    url: "https://github.com/weaveworks-liquidmetal/cluster-api-provider-microvm/releases/$CAPMVM_VERSION/infrastructure-components.yaml"
+    type: "InfrastructureProvider"
+EOF
+```
+
+```bash
+# Enable support for `ClusterResourceSet`s for automatically installing CNIs
+export EXP_CLUSTER_RESOURCE_SET=true
+
+clusterctl init --infrastructure microvm
+```
+
+**Summary**
+At the end of the process you would have a local management cluster for weave gitops enteprise looking similar to
+
+```bash
+➜  ~ k get pods -A                                                                                                                                                          <aws:sts>
+NAMESPACE                           NAME                                                              READY   STATUS    RESTARTS      AGE
+capd-system                         capd-controller-manager-58f499c89d-p4wgh                          1/1     Running   0             12h
+capi-kubeadm-bootstrap-system       capi-kubeadm-bootstrap-controller-manager-677f784fb6-dg2v4        1/1     Running   0             12h
+capi-kubeadm-control-plane-system   capi-kubeadm-control-plane-controller-manager-7bf594b9c5-hvcbw    1/1     Running   0             12h
+capi-system                         capi-controller-manager-75bfbdb687-g4gvt                          1/1     Running   0             12h
+capmvm-system                       capmvm-controller-manager-7dfd9ccdd7-mbmht                        1/1     Running   0             2m49s
+flux-system                         cert-manager-84554fc47f-4pcpg                                     1/1     Running   0             13h
+flux-system                         cert-manager-cainjector-5456b8bd74-tm9k5                          1/1     Running   0             13h
+flux-system                         cert-manager-webhook-6f9966c78f-72ph4                             1/1     Running   0             13h
+flux-system                         helm-controller-76d8587f4c-mfgrk                                  1/1     Running   0             13h
+flux-system                         kustomize-controller-867df89787-hj5kd                             1/1     Running   0             13h
+flux-system                         notification-controller-887c9d9d-dxr7z                            1/1     Running   0             13h
+flux-system                         policy-agent-6dd44f5754-xzf8w                                     1/1     Running   0             13h
+flux-system                         source-controller-9ffdccb9f-tz4zf                                 1/1     Running   0             13h
+flux-system                         tf-controller-7cc7949b99-7qt5b                                    1/1     Running   0             12h
+flux-system                         weave-gitops-enterprise-cluster-controller-6f8c69dc8-tq994        2/2     Running   5 (12h ago)   13h
+flux-system                         weave-gitops-enterprise-mccp-cluster-bootstrap-controller-cxd9c   2/2     Running   0             13h
+flux-system                         weave-gitops-enterprise-mccp-cluster-service-8485f5f956-pdtxw     1/1     Running   0             12h
+flux-system                         weave-gitops-enterprise-pipeline-controller-85b76d95bd-2sw7v      1/1     Running   0             13h
+kube-system                         coredns-6d4b75cb6d-g9cch                                          1/1     Running   0             13h
+kube-system                         coredns-6d4b75cb6d-mxwzl                                          1/1     Running   0             13h
+kube-system                         etcd-kind-control-plane                                           1/1     Running   0             13h
+kube-system                         kindnet-9p6hs                                                     1/1     Running   0             13h
+kube-system                         kube-apiserver-kind-control-plane                                 1/1     Running   0             13h
+kube-system                         kube-controller-manager-kind-control-plane                        1/1     Running   0             13h
+kube-system                         kube-proxy-tnx4q                                                  1/1     Running   0             13h
+kube-system                         kube-scheduler-kind-control-plane                                 1/1     Running   0             13h
+local-path-storage                  local-path-provisioner-9cd9bd544-ndzdz                            1/1     Running   0             13h
+
+```
+### Collect artifacts and publish to your private registry
+
+In your local environment you have installed the manifests, helm repositories and images. this section
+shows you how to sync charts and images to your private registry
+
+#### Helm charts
+
+Once you have installed wge in your environment you could get the helm charts that you need to have in
+your private registry
+
+```yaml
+➜  ~ k get helmcharts.source.toolkit.fluxcd.io                                                                                                                              <aws:sts>
+NAME                                  CHART           VERSION   SOURCE KIND      SOURCE NAME                      AGE   READY   STATUS
+flux-system-cert-manager              cert-manager    0.0.7     HelmRepository   weaveworks-charts                13h   True    pulled 'cert-manager' chart with version '0.0.7'
+flux-system-tf-controller             tf-controller   0.9.2     HelmRepository   tf-controller                    13h   True    pulled 'tf-controller' chart with version '0.9.2'
+flux-system-weave-gitops-enterprise   mccp            v0.10.1   HelmRepository   weave-gitops-enterprise-charts   13h   True    pulled 'mccp' chart with version '0.10.1'
+```
+**Manually**
+
+```bash
+helm repo add weaveworks-charts https://weaveworks.github.io/weave-gitops-profile-examples
+helm pull weaveworks-charts/cert-manager
+helm cm-push ./cert-manager-0.0.8.tgz private
+
+helm repo add tf-controller https://weaveworks.github.io/tf-controller/
+helm pull tf-controller/tf-controller
+helm cm-push ./tf-controller-0.9.2.tgz private
+
+helm repo add wge https://charts.dev.wkp.weave.works/releases/charts-v3
+helm pull wge/mccp
+helm cm-push ./mccp-0.10.1.tgz private
+```
+
+```bash
+helm search repo private                                                                                         <aws:sts>
+
+NAME                 	CHART VERSION	APP VERSION	DESCRIPTION
+private/cert-manager 	0.0.8        	           	A Weaveworks Helm chart for the Certificate Pro...
+private/mccp         	0.10.1       	1.16.0     	A Helm chart for Kubernetes
+private/tf-controller	0.9.2        	v0.13.1    	The Helm chart for Weave GitOps Terraform Contr...
+
+```
+**Charts-syncer**
+
+Optionally you could use for the previous tasks [charts-syncer](https://github.com/bitnami-labs/charts-syncer) to leverage
+charts syncing and container image upload.
+
+#### Container Images
+
+You could get them by running the following commnad
+
+```bash
+  kubectl get pods --all-namespaces -o jsonpath="{.items[*].spec['containers','initContainers'][*].image}" |\
+  tr -s '[[:space:]]' '\n' | sort | uniq | tee wge-images.txt
+```
+
+An example of the output could be as follow
+
+```bash
+➜  kubectl get pods --all-namespaces -o jsonpath="{.items[*].spec['containers','initContainers'][*].image}" |\                                                           <aws:sts>
+pipe>   tr -s '[[:space:]]' '\n' | sort | uniq | tee wge-images.txt
+
+docker.io/kindest/kindnetd:v20220510-4929dd75
+docker.io/kindest/local-path-provisioner:v0.0.22-kind.0
+docker.io/weaveworks/cluster-controller:v1.4.1
+docker.io/weaveworks/weave-gitops-enterprise-clusters-service:v0.10.1
+docker.io/weaveworks/weave-gitops-enterprise-ui-server:v0.10.1
+gcr.io/k8s-staging-cluster-api/capd-manager:v1.2.5
+gcr.io/kubebuilder/kube-rbac-proxy:v0.8.0
+ghcr.io/fluxcd/helm-controller:v0.23.1
+ghcr.io/fluxcd/kustomize-controller:v0.27.1
+ghcr.io/fluxcd/notification-controller:v0.25.2
+ghcr.io/fluxcd/source-controller:v0.28.0
+ghcr.io/weaveworks-liquidmetal/cluster-api-provider-microvm:v0.7.0
+ghcr.io/weaveworks/pipeline-controller:v0.0.4
+ghcr.io/weaveworks/tf-controller:v0.13.1
+k8s.gcr.io/coredns/coredns:v1.8.6
+k8s.gcr.io/etcd:3.5.3-0
+k8s.gcr.io/kube-apiserver:v1.24.0
+k8s.gcr.io/kube-controller-manager:v1.24.0
+k8s.gcr.io/kube-proxy:v1.24.0
+k8s.gcr.io/kube-scheduler:v1.24.0
+quay.io/jetstack/cert-manager-cainjector:v1.6.0
+quay.io/jetstack/cert-manager-controller:v1.6.0
+quay.io/jetstack/cert-manager-webhook:v1.6.0
+registry.k8s.io/cluster-api/cluster-api-controller:v1.2.5
+registry.k8s.io/cluster-api/kubeadm-bootstrap-controller:v1.2.5
+registry.k8s.io/cluster-api/kubeadm-control-plane-controller:v1.2.5
+weaveworks/cluster-bootstrap-controller:v0.3.0
+weaveworks/policy-agent:2.0.0
+```
+//TODO based on ranchers
+
+Once you have the list of images, you could pull them into your host as tarball with `wge-save-images.sh` script.
+
+```bash
+➜ ./wge-save-images.sh -l wge-images.txt
+
+Image pull success: docker.io/kindest/kindnetd:v20220510-4929dd75
+Image pull success: docker.io/kindest/local-path-provisioner:v0.0.22-kind.0
+Image pull success: docker.io/weaveworks/cluster-controller:v1.4.1
+...
+```
+
+Once the tarball has been created, push the images to the private registry with  `wge-load-images.sh` script.
+
+```bash
+➜ ./wge-load-images.sh -i wge-images.tar.gz -r myregistry.domain.com:5000
+
+Loaded image: k8s.gcr.io/kube-apiserver:v1.24.0
+Loaded image: weaveworks/weave-gitops-enterprise-ui-server:v0.10.1
+Loaded image: ghcr.io/fluxcd/helm-controller:v0.23.1
+Loaded image: kindest/kindnetd:v20220510-4929dd75
+Loaded image: ghcr.io/weaveworks/pipeline-controller:v0.0.4
+Loaded image: quay.io/jetstack/cert-manager-webhook:v1.6.0
+Loaded image: gcr.io/kubebuilder/kube-rbac-proxy:v0.8.0
+Loaded image: k8s.gcr.io/kube-controller-manager:v1.24.0
+Loaded image: k8s.gcr.io/kube-proxy:v1.24.0
+Loaded image: quay.io/jetstack/cert-manager-controller:v1.6.0
+...
+
+The push refers to repository [myregistry.domain.com:5000/docker.io/kindest/kindnetd]
+85f95acc8d0c: Pushed
+ce4f3bed20dd: Pushed
+c48088955b6e: Pushed
+v20220510-4929dd75: digest: sha256:9664435b55e3b4594e0cde46c740d8b952de104e0e178e2ef67e5317fec95c85 size: 951
+The push refers to repository [myregistry.domain.com:5000/docker.io/kindest/local-path-provisioner]
+621219e3f1e0: Pushed
+2b0084ea3c29: Pushed
+798afb9dcee7: Pushed
+...
+```
+
+### Install weave gitops enterprise
+At this stage you have in your private registry both the helm charts and container images required to install weave gitops
+enterprise.
+
+Follow the indications to [install wge](https://docs.gitops.weave.works/docs/installation/#installing-weave-gitops-enterprise)
+with the charts and images pointing to your local registry.
+
+An example of how it would look like for weave gitops enterprise is shown below.
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: weave-gitops-enterprise-charts
+  namespace: flux-system
+spec:
+  interval: 10m
+  secretRef:
+    name: weave-gitops-enterprise-credentials
+  url: http://myregistry.domain.com:8080/
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: weave-gitops-enterprise
+  namespace: flux-system
+spec:
+  chart:
+    spec:
+      chart: mccp
+      sourceRef:
+        kind: HelmRepository
+        name: weave-gitops-enterprise-charts
+        namespace: flux-system
+  interval: 10m0s
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+  values:
+    global:
+      capiEnabled: true
+    enablePipelines: true
+    enableTerraformUI: true
+    clusterBootstrapController:
+      enabled: true
+    #images changed
+    cluster-controller:
+      controllerManager:
+        kubeRbacProxy:
+          image:
+            repository: myregistry.domain.com:5000/gcr.io/kubebuilder/kube-rbac-proxy
+            tag: v0.8.0
+        manager:
+          image:
+            repository: myregistry.domain.com:5000/docker.io/weaveworks/cluster-controller
+            tag: v1.4.1
+    policy-agent:
+      enabled: true
+      image: myregistry.domain.com:5000/weaveworks/policy-agent
+    pipeline-controller:
+      controller:
+          manager:
+            image:
+              repository: myregistry.domain.com:5000/ghcr.io/weaveworks/pipeline-controller
+    images:
+      clustersService: myregistry.domain.com:5000/docker.io/weaveworks/weave-gitops-enterprise-clusters-service:v0.10.1
+      uiServer: myregistry.domain.com:5000/docker.io/weaveworks/weave-gitops-enterprise-ui-server:v0.10.1
+      clusterBootstrapController: myregistry.domain.com:5000/weaveworks/cluster-bootstrap-controller:v0.4.0
+```
