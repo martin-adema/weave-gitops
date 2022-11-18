@@ -1,0 +1,17 @@
+apiVersion: vendir.k14s.io/v1alpha1
+kind: Config
+directories:
+- path: charts
+  contents:
+  - path: cert-manager
+    http:
+      url: https://github.com/weaveworks/weave-gitops-profile-examples/releases/download/cert-manager-0.0.8/cert-manager-0.0.8.tgz
+      disableUnpack: true
+  - path: tf-controller
+    http:
+      url: https://weaveworks.github.io/tf-controller/tf-controller-0.9.2.tgz
+      disableUnpack: true
+  - path: wge
+    http:
+      url: https://s3.us-east-1.amazonaws.com/weaveworks-wkp/releases/charts-v3/mccp-10.0.0-rc.1.tgz
+      disableUnpack: true

@@ -2,7 +2,6 @@
 title: Airgap environments
 sidebar_position: 1
 hide_title: true
-toc_min_heading_level: 1
 toc_max_heading_level: 4
 ---
 
@@ -385,18 +384,14 @@ flux-system-weave-gitops-enterprise   mccp            v0.10.1   HelmRepository  
 ```
 **Manually**
 
+Install https://carvel.dev/vendir/
+
 ```bash
-helm repo add weaveworks-charts https://weaveworks.github.io/weave-gitops-profile-examples
-helm pull weaveworks-charts/cert-manager
-helm cm-push ./cert-manager-0.0.8.tgz private
+vendir sync  -f vendir.yml
 
-helm repo add tf-controller https://weaveworks.github.io/tf-controller/
-helm pull tf-controller/tf-controller
-helm cm-push ./tf-controller-0.9.2.tgz private
-
-helm repo add wge https://charts.dev.wkp.weave.works/releases/charts-v3
-helm pull wge/mccp
-helm cm-push ./mccp-0.10.1.tgz private
+helm cm-push ./charts/cert-manager/cert-manager-0.0.8.tgz private
+helm cm-push ./charts/tf-controller/tf-controller-0.9.2.tgz private
+helm cm-push ./charts/wge/mccp-0.10.1.tgz private
 ```
 
 ```bash
