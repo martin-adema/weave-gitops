@@ -75,6 +75,7 @@ function HelmReleaseDetail({
       customTabs={customTabs}
       customActions={customActions}
       info={[
+        ["Kind", Kind.HelmRelease],
         ["Source", helmChartLink(helmRelease)],
         ["Chart", helmRelease?.helmChart.chart],
         ["Chart Version", helmRelease.helmChart.version],
@@ -87,6 +88,7 @@ function HelmReleaseDetail({
           "Last Updated",
           <Timestamp time={automationLastUpdated(helmRelease)} />,
         ],
+        ["Namespace", helmRelease?.namespace],
       ]}
     />
   );
