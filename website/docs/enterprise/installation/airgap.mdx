@@ -14,15 +14,20 @@ to ensure that a secure computer network is physically isolated from unsecured n
 
 This document guides on how to install Weave Gitops Enterprise in a restricted environment.
 
-# Restrictions
+# Before Start
 
-There are many restriction could happen within an airgap environment. This guide assumes that you have egress network
+There are multiple restrictions that could happen within an airgap environment. This guide assumes that you have egress network
 restrictions. In order to install Weave Gitops Enterprise (WGE), the required artifacts are required to be loaded
 from a private registry. This guide helps you with the task to identity the helm charts
 and container images required to install WGE and to load them into your private registry.
 
-A second assumption is that you could prepare the installation from a proxy host that has internet
-access to push artifacts into your private registry. We will refer it as proxy or proxy host. 
+This guide also assumes that you could prepare the installation from a proxy host. A proxy host is defined here
+as a computer that is able to access to both the public and private network. It could take different shapes,
+for example, it could be a bastion host, a corp laptop, etc.
+
+Finally, access to both public and private network is required during the airgap installation but not simultaneously.
+It is expected to have an online stage to gather the artifacts first, and an offline stage later,
+to load the artifacts in the private network.
 
 # Install
 
