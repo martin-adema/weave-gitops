@@ -21,13 +21,16 @@ restrictions. In order to install Weave Gitops Enterprise (WGE), the required ar
 from a private registry. This guide helps you with the task to identity the helm charts
 and container images required to install WGE and to load them into your private registry.
 
-This guide also assumes that you could prepare the installation from a proxy host. A proxy host is defined here
+It also assumes that you could prepare the installation from a proxy host. A proxy host is defined here
 as a computer that is able to access to both the public and private network. It could take different shapes,
 for example, it could be a bastion host, a corp laptop, etc.
 
-Finally, access to both public and private network is required during the airgap installation but not simultaneously.
+Access to both public and private network is required during the airgap installation but not simultaneously.
 It is expected to have an online stage to gather the artifacts first, and an offline stage later,
 to load the artifacts in the private network.
+
+Finally, we aim to provide an end to end example to use it as a guidance more than a recipe. Feel free to adapt the details
+that do not fit within your context.
 
 # Install
 
