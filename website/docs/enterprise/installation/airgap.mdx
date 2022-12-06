@@ -147,45 +147,86 @@ At this stage you have already a private registry for container images and helm 
 
 This step is to gather the artifacts and images in your local environment to push to the private registry.
 
-#### Cert Manager
+####  Cluster API
 
-```yaml
----
-apiVersion: source.toolkit.fluxcd.io/v1beta2
-kind: HelmRepository
-metadata:
-  name: weaveworks-charts
-  namespace: flux-system
-spec:
-  interval: 1m0s
-  timeout: 1m0s
-  url: https://weaveworks.github.io/weave-gitops-profile-examples/
----
-apiVersion: helm.toolkit.fluxcd.io/v2beta1
-kind: HelmRelease
-metadata:
-  labels:
-    weave.works/applied-layer: layer-0
-  name: cert-manager
-  namespace: flux-system
-spec:
-  chart:
-    spec:
-      chart: cert-manager
-      version: "0.0.8"
-      sourceRef:
-        apiVersion: source.toolkit.fluxcd.io/v1beta2
-        kind: HelmRepository
-        name: weaveworks-charts
-        namespace: flux-system
-  install:
-    crds: CreateReplace
-  interval: 1m0s
-  upgrade:
-    crds: CreateReplace
-  values:
-    cert-manager:
-      installCRDs: true
+This would vary depending on the provider, given that we target a offline environment, most likely we are in
+a private cloud environment, so we will be using [liquidmetal](https://weaveworks-liquidmetal.github.io/site/docs/tutorial-basics/capi/).
+
+Create the following environment variables with the adjustments to your context
+
+```shell
+export CAPI_BASE_PATH=/tmp/capi
+export CERT_MANAGER_VERSION=v1.9.1
+export CAPI_VERSION=v1.3.0
+export CAPMVM_VERSION=v0.7.0
+export EXP_CLUSTER_RESOURCE_SET=true
+export CONTROL_PLANE_MACHINE_COUNT=1
+export WORKER_MACHINE_COUNT=1
+export CONTROL_PLANE_VIP="192.168.100.9"
+export HOST_ENDPOINT="192.168.1.130:9090"
+```
+
+Create `clusterctl.yaml` from the following script
+
+```shell
+cat << EOF > clusterctl.yaml
+cert-manager:
+  url: "$CAPI_BASE_PATH/cert-manager/$CERT_MANAGER_VERSION/cert-manager.yaml"
+
+providers:
+  - name: "microvm"
+    url: "$CAPI_BASE_PATH/infrastructure-microvm/$CAPMVM_VERSION/infrastructure-components.yaml"
+    type: "InfrastructureProvider"
+  - name: "cluster-api"
+    url: "$CAPI_BASE_PATH/cluster-api/$CAPI_VERSION/core-components.yaml"
+    type: "CoreProvider"
+  - name: "kubeadm"
+    url: "$CAPI_BASE_PATH/bootstrap-kubeadm/$CAPI_VERSION/bootstrap-components.yaml"
+    type: "BootstrapProvider"
+  - name: "kubeadm"
+    url: "$CAPI_BASE_PATH/control-plane-kubeadm/$CAPI_VERSION/control-plane-components.yaml"
+    type: "ControlPlaneProvider"
+EOF
+```
+Execute `make` using the following makefile to intialise capi in your cluster
+
+```makefile
+.PHONY := capi
+
+capi: capi-init capi-cluster
+
+capi-init: cert-manager cluster-api bootstrap-kubeadm control-plane-kubeadm microvm clusterctl-init
+
+cert-manager:
+	mkdir -p  $(CAPI_BASE_PATH)/cert-manager/$(CERT_MANAGER_VERSION)
+	curl -L https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml --output $(CAPI_BASE_PATH)/cert-manager/$(CERT_MANAGER_VERSION)/cert-manager.yaml
+
+cluster-api:
+	mkdir -p  $(CAPI_BASE_PATH)/cluster-api/$(CAPI_VERSION)
+	curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/$(CAPI_VERSION)/core-components.yaml --output $(CAPI_BASE_PATH)/cluster-api/$(CAPI_VERSION)/core-components.yaml
+	curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/$(CAPI_VERSION)/metadata.yaml --output $(CAPI_BASE_PATH)/cluster-api/$(CAPI_VERSION)/metadata.yaml
+
+bootstrap-kubeadm:
+	mkdir -p  $(CAPI_BASE_PATH)/bootstrap-kubeadm/$(CAPI_VERSION)
+	curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/$(CAPI_VERSION)/bootstrap-components.yaml --output $(CAPI_BASE_PATH)/bootstrap-kubeadm/$(CAPI_VERSION)/bootstrap-components.yaml
+	curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/$(CAPI_VERSION)/metadata.yaml --output $(CAPI_BASE_PATH)/bootstrap-kubeadm/$(CAPI_VERSION)/metadata.yaml
+
+control-plane-kubeadm:
+	mkdir -p  $(CAPI_BASE_PATH)/control-plane-kubeadm/$(CAPI_VERSION)
+	curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/$(CAPI_VERSION)/control-plane-components.yaml --output $(CAPI_BASE_PATH)/control-plane-kubeadm/$(CAPI_VERSION)/control-plane-components.yaml
+	curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/$(CAPI_VERSION)/metadata.yaml --output $(CAPI_BASE_PATH)/control-plane-kubeadm/$(CAPI_VERSION)/metadata.yaml
+
+microvm:
+	mkdir -p  $(CAPI_BASE_PATH)/infrastructure-microvm/$(CAPMVM_VERSION)
+	curl -L https://github.com/weaveworks-liquidmetal/cluster-api-provider-microvm/releases/download/$(CAPMVM_VERSION)/infrastructure-components.yaml --output $(CAPI_BASE_PATH)/infrastructure-microvm/$(CAPMVM_VERSION)/infrastructure-components.yaml
+	curl -L https://github.com/weaveworks-liquidmetal/cluster-api-provider-microvm/releases/download/$(CAPMVM_VERSION)/cluster-template-cilium.yaml --output $(CAPI_BASE_PATH)/infrastructure-microvm/$(CAPMVM_VERSION)/cluster-template-cilium.yaml
+	curl -L https://github.com/weaveworks-liquidmetal/cluster-api-provider-microvm/releases/download/$(CAPMVM_VERSION)/metadata.yaml --output $(CAPI_BASE_PATH)/infrastructure-microvm/$(CAPMVM_VERSION)/metadata.yaml
+
+clusterctl-init:
+	clusterctl init --wait-providers -v 4 --config clusterctl.yaml --infrastructure microvm
+
+capi-cluster:
+	clusterctl generate cluster --config clusterctl.yaml -i microvm:$(CAPMVM_VERSION) -f cilium lm-demo | kubectl apply -f -
 ```
 
 #### TF-Controller
@@ -221,38 +262,6 @@ spec:
       retries: 3
   upgrade:
     crds: CreateReplace
-```
-
-####  Cluster API
-
-This would vary depending on the provider, given that we target a offline environment, most likely we are in 
-a private cloud environment, so we will be using [liquidmetal](https://weaveworks-liquidmetal.github.io/site/docs/tutorial-basics/capi/).
-
-```bash
-export CAPMVM_VERSION=v0.7.0
-export EXP_CLUSTER_RESOURCE_SET=true
-
-mkdir -p ~/.cluster-api
-cat << EOF >>~/.cluster-api/clusterctl.yaml
-providers:
-  - name: "microvm"
-    url: "https://github.com/weaveworks-liquidmetal/cluster-api-provider-microvm/releases/$CAPMVM_VERSION/infrastructure-components.yaml"
-    type: "InfrastructureProvider"
-EOF
-
-clusterctl init --infrastructure microvm --wait-providers
-```
-
-Create a cluster manifest to generate the manifests containing the host container images
-```bash
-export CAPMVM_VERSION=v0.7.0
-export CLUSTER_NAME=lm-demo
-export CONTROL_PLANE_MACHINE_COUNT=1
-export WORKER_MACHINE_COUNT=1
-export CONTROL_PLANE_VIP="192.168.100.9" # update to suit your network
-export HOST_ENDPOINT="192.168.1.130:9090" # don't forget to include the port!
-
-clusterctl generate cluster -i microvm:$CAPMVM_VERSION -f cilium $CLUSTER_NAME | kubectl apply -f -
 ```
 
 #### Weave Gitops Enterprise
@@ -403,11 +412,7 @@ The following Makefile could help you with each of the stages.
 #set these variable with your custom configuration
 PRIVATE_HELM_REPO_NAME=private
 REGISTRY=localhost:5001
-CERT_MANAGER_VERSION=0.0.8
 WGE_VERSION=0.10.2
-
-CERT_MANAGER=cert-manager-$(CERT_MANAGER_VERSION)
-CERT_MANAGER_CHART=$(CERT_MANAGER).tgz
 
 WGE=mccp-$(WGE_VERSION)
 WGE_CHART=$(WGE).tgz
@@ -423,11 +428,9 @@ images:
     | sort | uniq | xargs -L 1 -I {} ./image-pull-push.sh {} $(REGISTRY)
 
 pull-charts:
-	curl -L https://github.com/weaveworks/weave-gitops-profile-examples/releases/download/$(CERT_MANAGER)/$(CERT_MANAGER_CHART) --output $(CERT_MANAGER_CHART)
 	curl -L https://s3.us-east-1.amazonaws.com/weaveworks-wkp/releases/charts-v3/$(WGE_CHART) --output  $(WGE_CHART)
 
 push-charts:
-	helm cm-push -f $(CERT_MANAGER_CHART) $(PRIVATE_HELM_REPO_NAME)
 	helm cm-push -f $(WGE_CHART) $(PRIVATE_HELM_REPO_NAME)
 ```
 where `image-pull-push.sh` is similar to
@@ -454,7 +457,9 @@ ghcr.io/weaveworks-liquidmetal/flintlock-kernel:5.10.77
 
 ```
 
-## Install Weave Gitops Enterprise
+## Airgap Install
+
+### Weave Gitops Enterprise
 At this stage you have in your private registry both the helm charts and container images required to install weave gitops
 enterprise.Now you are ready to install WGE from your private registry.
 
@@ -467,44 +472,6 @@ with the following considerations:
 An example of how it would look like for Weave Gitops Enterprise is shown below.
 
 ```yaml
----
-apiVersion: source.toolkit.fluxcd.io/v1beta2
-kind: HelmRepository
-metadata:
-  name: weaveworks-chart
-  namespace: flux-system
-spec:
-  interval: 1m0s
-  timeout: 1m0s
-  url: http://helm-repo-chartmuseum:8080
----
-apiVersion: helm.toolkit.fluxcd.io/v2beta1
-kind: HelmRelease
-metadata:
-  labels:
-    weave.works/applied-layer: layer-0
-  name: cert-manager
-  namespace: flux-system
-spec:
-
-  chart:
-    spec:
-      version: 0.0.8
-      chart: cert-manager
-      sourceRef:
-        apiVersion: source.toolkit.fluxcd.io/v1beta2
-        kind: HelmRepository
-        name: weaveworks-charts
-        namespace: flux-system
-  install:
-    crds: CreateReplace
-  interval: 1m0s
-  upgrade:
-    crds: CreateReplace
-  values:
-    cert-manager:
-      installCRDs: true
----
 apiVersion: source.toolkit.fluxcd.io/v1beta2
 kind: HelmRepository
 metadata:
@@ -566,3 +533,15 @@ spec:
       uiServer: localhost:5001/docker.io/weaveworks/weave-gitops-enterprise-ui-server:v0.10.2
       clusterBootstrapController: localhost:5001/weaveworks/cluster-bootstrap-controller:v0.4.0
 ```
+
+###  Cluster API
+
+Indicate in the cluster api configuration file `clusterctl.yaml` that you want to use images from the private repo as follow
+
+```yaml
+images:
+  all:
+    repository: localhost:5001/docker.io
+```
+
+Install capi following the same make targets as
