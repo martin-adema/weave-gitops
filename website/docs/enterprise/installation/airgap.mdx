@@ -152,7 +152,7 @@ This step is to gather the artifacts and images in your local environment to pus
 This would vary depending on the provider, given that we target a offline environment, most likely we are in
 a private cloud environment, so we will be using [liquidmetal](https://weaveworks-liquidmetal.github.io/site/docs/tutorial-basics/capi/).
 
-Create the following environment variables with the adjustments to your context
+Export these environment variables to configure CAPI experience. Adjust them to your context.
 
 ```shell
 export CAPI_BASE_PATH=/tmp/capi
@@ -166,7 +166,7 @@ export CONTROL_PLANE_VIP="192.168.100.9"
 export HOST_ENDPOINT="192.168.1.130:9090"
 ```
 
-Create `clusterctl.yaml` from the following script
+Execute the following script to generate `clusterctl` config file.
 
 ```shell
 cat << EOF > clusterctl.yaml
@@ -536,12 +536,14 @@ spec:
 
 ###  Cluster API
 
-Indicate in the cluster api configuration file `clusterctl.yaml` that you want to use images from the private repo as follow
+Indicate in the cluster api configuration file `clusterctl.yaml` that you want to use images from the private repo
+by leveraging [image overrides](https://cluster-api.sigs.k8s.io/clusterctl/configuration.html#image-overrides).
 
 ```yaml
 images:
   all:
-    repository: localhost:5001/docker.io
+    repository: localhost:5001/registry.k8s.io/cluster-api
+  infrastructure-microvm:
+    repository: localhost:5001/ghcr.io/weaveworks-liquidmetal
 ```
-
-Install capi following the same make targets as
+Then execute `make clusterctl-init` to init capi using your private registry.
