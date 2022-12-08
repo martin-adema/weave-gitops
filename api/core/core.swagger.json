@@ -360,6 +360,55 @@
         ]
       }
     },
+    "/v1/session/{sessionId}/logs": {
+      "get": {
+        "summary": "GetSessionLogs returns the logs for a given session",
+        "operationId": "Core_GetSessionLogs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetSessionLogsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "clusterName",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Core"
+        ]
+      }
+    },
     "/v1/suspend": {
       "post": {
         "summary": "ToggleSuspendResource suspends or resumes a flux object.",
@@ -685,6 +734,20 @@
           "items": {
             "$ref": "#/definitions/v1Object"
           }
+        }
+      }
+    },
+    "v1GetSessionLogsResponse": {
+      "type": "object",
+      "properties": {
+        "logs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "nextToken": {
+          "type": "string"
         }
       }
     },
