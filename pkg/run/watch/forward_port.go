@@ -8,7 +8,10 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+	"github.com/mattn/go-tty"
+	"github.com/pkg/browser"
 	"github.com/weaveworks/weave-gitops/core/logger"
+	clilogger "github.com/weaveworks/weave-gitops/pkg/logger"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/portforward"
@@ -22,6 +25,11 @@ type PortForwardSpec struct {
 	HostPort      string
 	ContainerPort string
 	Map           map[string]string
+}
+
+type PortForwardShortcut struct {
+	Name     string
+	HostPort string
 }
 
 // parse port forward specin the key-value format of "port=8000:8080,resource=svc/app,namespace=default"
@@ -125,4 +133,41 @@ func ForwardPort(log logr.Logger, pod *corev1.Pod, cfg *rest.Config, specMap *Po
 	}
 
 	return fw.ForwardPorts()
+}
+
+func ShowPortForwards(log clilogger.Logger, portForwards map[string]*PortForwardShortcut) {
+	// print keyboard shortcuts
+	// print text in bold
+	fmt.Printf("\n\033[1m%s\033[0m\n\n", "We set up port forwards for you, use the number below to open it in the browser")
+
+	for key, portForward := range portForwards {
+		fmt.Printf("(%s) %s: http://localhost:%s\n", key, portForward.Name, portForward.HostPort)
+	}
+
+	fmt.Println()
+
+	// listen for keypresses
+	go func() {
+		tty, err := tty.Open()
+		if err != nil {
+			log.Failuref("Error opening tty: %v", err)
+		}
+		defer tty.Close()
+
+		for {
+			r, err := tty.ReadRune()
+			if err != nil {
+				log.Failuref("Error reading keypress: %v", err)
+			}
+
+			portForward := portForwards[string(r)]
+
+			if portForward != nil {
+				err = browser.OpenURL(fmt.Sprintf("http://localhost:%s", portForward.HostPort))
+				if err != nil {
+					log.Failuref("Error opening portforward URL: %v", err)
+				}
+			}
+		}
+	}()
 }

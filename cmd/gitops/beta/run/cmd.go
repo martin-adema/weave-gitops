@@ -830,12 +830,39 @@ func runCommandWithoutSession(cmd *cobra.Command, args []string) error {
 						log.Successf("Reconciliation is done.")
 					}
 
+					portForwards := map[string]*watch.PortForwardShortcut{}
+
+					if dashboardInstalled {
+						portForwards[fmt.Sprint(len(portForwards)+1)] = &watch.PortForwardShortcut{
+							Name:     dashboardName,
+							HostPort: flags.DashboardPort,
+						}
+					}
+
+					var specMap *watch.PortForwardSpec
+
 					if flags.PortForward != "" {
-						specMap, err := watch.ParsePortForwardSpec(flags.PortForward)
+						specMap, err = watch.ParsePortForwardSpec(flags.PortForward)
 						if err != nil {
 							log.Failuref("Error parsing port forward spec: %v", err)
-						}
+						} else {
+							serviceName := specMap.Name
+							if serviceName == "" {
+								serviceName = "service"
+							}
 
+							portForwards[fmt.Sprint(len(portForwards)+1)] = &watch.PortForwardShortcut{
+								Name:     serviceName,
+								HostPort: specMap.HostPort,
+							}
+						}
+					}
+
+					if len(portForwards) > 0 {
+						watch.ShowPortForwards(log, portForwards)
+					}
+
+					if specMap != nil {
 						// get pod from specMap
 						namespacedName := types.NamespacedName{Namespace: specMap.Namespace, Name: specMap.Name}
 
