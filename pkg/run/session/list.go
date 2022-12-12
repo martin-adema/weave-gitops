@@ -3,10 +3,11 @@ package session
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"strings"
 )
 
 func Get(kubeClient client.Client, name string, namespace string) (*InternalSession, error) {
@@ -33,22 +34,23 @@ func Get(kubeClient client.Client, name string, namespace string) (*InternalSess
 
 	annotations := statefulSet.GetAnnotations()
 	result = &InternalSession{
-		Name:        statefulSet.Name,
-		Namespace:   statefulSet.Namespace,
-		Command:     annotations["run.weave.works/command"],
-		CliVersion:  annotations["run.weave.works/cli-version"],
-		PortForward: strings.Split(annotations["run.weave.works/port-forward"], ","),
+		SessionName:      statefulSet.Name,
+		SessionNamespace: statefulSet.Namespace,
+		Command:          annotations["run.weave.works/command"],
+		CliVersion:       annotations["run.weave.works/cli-version"],
+		PortForward:      strings.Split(annotations["run.weave.works/port-forward"], ","),
+		Namespace:        annotations["run.weave.works/namespace"],
 	}
 
 	return result, nil
 }
 
-func List(kubeClient client.Client, namespace string) ([]*InternalSession, error) {
+func List(kubeClient client.Client, targetNamespace string) ([]*InternalSession, error) {
 	var result []*InternalSession
 
 	statefulSets := appsv1.StatefulSetList{}
 	if err := kubeClient.List(context.Background(), &statefulSets,
-		client.InNamespace(namespace),
+		client.InNamespace(targetNamespace),
 		client.MatchingLabels(map[string]string{
 			"app":                       "vcluster",
 			"app.kubernetes.io/part-of": "gitops-run",
@@ -61,11 +63,12 @@ func List(kubeClient client.Client, namespace string) ([]*InternalSession, error
 		annotations := s.GetAnnotations()
 
 		result = append(result, &InternalSession{
-			Name:        s.Name,
-			Namespace:   s.Namespace,
-			Command:     annotations["run.weave.works/command"],
-			CliVersion:  annotations["run.weave.works/cli-version"],
-			PortForward: strings.Split(annotations["run.weave.works/port-forward"], ","),
+			SessionName:      s.Name,
+			SessionNamespace: s.Namespace,
+			Command:          annotations["run.weave.works/command"],
+			CliVersion:       annotations["run.weave.works/cli-version"],
+			PortForward:      strings.Split(annotations["run.weave.works/port-forward"], ","),
+			Namespace:        annotations["run.weave.works/namespace"],
 		})
 	}
 
