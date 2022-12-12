@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -37,6 +38,13 @@ const (
 	ClaimGroups string = "groups"
 )
 
+// DefaultScopes is the set of scopes that we require.
+var DefaultScopes = []string{
+	oidc.ScopeOpenID,
+	ScopeEmail,
+	ScopeGroups,
+}
+
 // OIDCConfig is used to configure an AuthServer to interact with
 // an OIDC issuer.
 type OIDCConfig struct {
@@ -45,6 +53,7 @@ type OIDCConfig struct {
 	ClientSecret  string
 	RedirectURL   string
 	TokenDuration time.Duration
+	Scopes        []string
 	ClaimsConfig  *ClaimsConfig
 }
 
@@ -110,7 +119,25 @@ func NewOIDCConfigFromSecret(secret corev1.Secret) OIDCConfig {
 
 	cfg.TokenDuration = tokenDuration
 
+	scopes := splitAndTrim(string(secret.Data["customScopes"]))
+	if len(scopes) == 0 {
+		scopes = []string{oidc.ScopeOpenID, ScopeEmail, ScopeGroups}
+	}
+
+	cfg.Scopes = scopes
+
 	return cfg
+}
+
+func splitAndTrim(s string) []string {
+	result := []string{}
+	for _, s := range strings.Split(s, ",") {
+		if v := strings.TrimSpace(s); v != "" {
+			result = append(result, v)
+		}
+	}
+
+	return result
 }
 
 func claimsConfigFromSecret(secret corev1.Secret) *ClaimsConfig {
@@ -214,27 +241,19 @@ func (s *AuthServer) verifier() *oidc.IDTokenVerifier {
 }
 
 func (s *AuthServer) oauth2Config(scopes []string) *oauth2.Config {
+	requestScopes := append(scopes)
 	// Ensure "openid" scope is always present.
 	if !contains(scopes, oidc.ScopeOpenID) {
-		scopes = append(scopes, oidc.ScopeOpenID)
+		scopes = append(requestScopes, oidc.ScopeOpenID)
 	}
-
-	// Request "email" scope to get user's email address.
-	if !contains(scopes, ScopeEmail) {
-		scopes = append(scopes, ScopeEmail)
-	}
-
-	// Request "groups" scope to get user's groups.
-	if !contains(scopes, ScopeGroups) {
-		scopes = append(scopes, ScopeGroups)
-	}
+	requestScopes = append(requestScopes, s.OIDCConfig.Scopes...)
 
 	return &oauth2.Config{
 		ClientID:     s.OIDCConfig.ClientID,
 		ClientSecret: s.OIDCConfig.ClientSecret,
 		RedirectURL:  s.OIDCConfig.RedirectURL,
 		Endpoint:     s.provider.Endpoint(),
-		Scopes:       scopes,
+		Scopes:       requestScopes,
 	}
 }
 

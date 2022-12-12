@@ -181,6 +181,7 @@ func TestOauth2FlowRedirectsToOIDCIssuerForUnauthenticatedRequests(t *testing.T)
 		ClientSecret: fake.ClientSecret,
 		IssuerURL:    fake.Issuer,
 		ClaimsConfig: &auth.ClaimsConfig{Username: "email", Groups: "groups"},
+		Scopes:       auth.DefaultScopes,
 	}
 
 	authMethods := map[auth.AuthMethod]bool{auth.OIDC: true}
